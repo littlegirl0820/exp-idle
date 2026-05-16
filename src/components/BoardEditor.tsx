@@ -96,16 +96,28 @@ export function BoardEditor({
         </div>
 
         <label className="rangeField">
-          <span>Scale</span>
+          <span>Scale X</span>
           <input
             type="range"
-            min="0.45"
+            min="0.12"
             max="1.2"
             step="0.01"
-            value={transform.scale}
-            onChange={(event) => updateTransform("scale", Number(event.target.value))}
+            value={transform.scaleX}
+            onChange={(event) => updateTransform("scaleX", Number(event.target.value))}
           />
-          <output>{transform.scale.toFixed(2)}</output>
+          <output>{transform.scaleX.toFixed(2)}</output>
+        </label>
+        <label className="rangeField">
+          <span>Scale Y</span>
+          <input
+            type="range"
+            min="0.12"
+            max="1.2"
+            step="0.01"
+            value={transform.scaleY}
+            onChange={(event) => updateTransform("scaleY", Number(event.target.value))}
+          />
+          <output>{transform.scaleY.toFixed(2)}</output>
         </label>
         <label className="rangeField">
           <span>X</span>

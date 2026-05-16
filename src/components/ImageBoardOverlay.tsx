@@ -15,8 +15,8 @@ const viewBoxSize = 1000;
 
 function transformedPoint(cell: Cell, transform: OverlayTransform): { x: number; y: number } {
   return {
-    x: (0.5 + (cell.x - 0.5) * transform.scale + transform.offsetX) * viewBoxSize,
-    y: (0.5 + (cell.y - 0.5) * transform.scale + transform.offsetY) * viewBoxSize
+    x: (0.5 + (cell.x - 0.5) * transform.scaleX + transform.offsetX) * viewBoxSize,
+    y: (0.5 + (cell.y - 0.5) * transform.scaleY + transform.offsetY) * viewBoxSize
   };
 }
 
@@ -30,10 +30,10 @@ function confidenceForCell(recognition: RecognizedCellState[], cellId: number): 
 
 function cellRadius(board: Board, transform: OverlayTransform): number {
   if (board.kind === "square") {
-    return (viewBoxSize * transform.scale) / board.size / 2;
+    return (viewBoxSize * Math.min(transform.scaleX, transform.scaleY)) / board.size / 2;
   }
 
-  return viewBoxSize * transform.scale * 0.043;
+  return viewBoxSize * Math.min(transform.scaleX, transform.scaleY) * 0.07;
 }
 
 function SquareCell({
@@ -47,16 +47,18 @@ function SquareCell({
   active: boolean;
   transform: OverlayTransform;
 }) {
-  const size = board.kind === "square" ? (viewBoxSize * transform.scale) / board.size : 0;
-  const visualSize = size * 0.9;
+  const width = board.kind === "square" ? (viewBoxSize * transform.scaleX) / board.size : 0;
+  const height = board.kind === "square" ? (viewBoxSize * transform.scaleY) / board.size : 0;
+  const visualWidth = width * 0.9;
+  const visualHeight = height * 0.9;
 
   return (
     <rect
       className={active ? "cellShape cellShapeActive" : "cellShape"}
-      x={point.x - visualSize / 2}
-      y={point.y - visualSize / 2}
-      width={visualSize}
-      height={visualSize}
+      x={point.x - visualWidth / 2}
+      y={point.y - visualHeight / 2}
+      width={visualWidth}
+      height={visualHeight}
       rx="7"
     />
   );

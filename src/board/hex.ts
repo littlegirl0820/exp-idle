@@ -35,6 +35,9 @@ export function createHexBoard(difficulty: Extract<Difficulty, "hard" | "expert"
   const minY = Math.min(...projected.map((cell) => cell.py));
   const maxY = Math.max(...projected.map((cell) => cell.py));
   const padding = 0.08;
+  const span = Math.max(maxX - minX, maxY - minY);
+  const centerX = (minX + maxX) / 2;
+  const centerY = (minY + maxY) / 2;
 
   const cells = projected.map((cell, id) => ({
     id,
@@ -43,8 +46,8 @@ export function createHexBoard(difficulty: Extract<Difficulty, "hard" | "expert"
     r: cell.r,
     row: cell.row,
     col: cell.col,
-    x: padding + ((cell.px - minX) / (maxX - minX)) * (1 - padding * 2),
-    y: padding + ((cell.py - minY) / (maxY - minY)) * (1 - padding * 2)
+    x: 0.5 + ((cell.px - centerX) / span) * (1 - padding * 2),
+    y: 0.5 + ((cell.py - centerY) / span) * (1 - padding * 2)
   }));
 
   const byCoordinate = new Map(cells.map((cell) => [`${cell.q},${cell.r}`, cell.id]));

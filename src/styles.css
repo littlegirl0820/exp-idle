@@ -168,7 +168,7 @@ button:disabled {
 
 .rangeField {
   display: grid;
-  grid-template-columns: 44px minmax(0, 1fr) 44px;
+  grid-template-columns: 58px minmax(0, 1fr) 44px;
   align-items: center;
   gap: 10px;
   color: var(--text-muted);

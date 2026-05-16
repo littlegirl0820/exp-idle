@@ -10,7 +10,8 @@ import {
 import { solveArrowPuzzle, type ArrowPuzzleSolution } from "./solver/arrowPuzzleSolver";
 
 const defaultTransform: OverlayTransform = {
-  scale: 0.88,
+  scaleX: 0.88,
+  scaleY: 0.88,
   offsetX: 0,
   offsetY: 0
 };
@@ -90,6 +91,9 @@ function App() {
 
     try {
       const result = await analyzeImageBoard(imageUrl, board, transform);
+      if (result.suggestedTransform) {
+        setTransform(result.suggestedTransform);
+      }
       setStates(result.states);
       setRecognition(result.cells);
       const lowConfidence = result.cells.filter((cell) => cell.confidence < 0.28).length;

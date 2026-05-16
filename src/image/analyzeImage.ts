@@ -1,7 +1,8 @@
 import type { Board, Cell } from "../board";
 
 export type OverlayTransform = {
-  scale: number;
+  scaleX: number;
+  scaleY: number;
   offsetX: number;
   offsetY: number;
 };
@@ -15,6 +16,7 @@ export type RecognizedCellState = {
 export type RecognitionResult = {
   states: number[];
   cells: RecognizedCellState[];
+  suggestedTransform?: OverlayTransform;
 };
 
 function toImagePoint(
@@ -22,8 +24,8 @@ function toImagePoint(
   image: HTMLImageElement,
   transform: OverlayTransform
 ): { x: number; y: number } {
-  const normalizedX = 0.5 + (cell.x - 0.5) * transform.scale + transform.offsetX;
-  const normalizedY = 0.5 + (cell.y - 0.5) * transform.scale + transform.offsetY;
+  const normalizedX = 0.5 + (cell.x - 0.5) * transform.scaleX + transform.offsetX;
+  const normalizedY = 0.5 + (cell.y - 0.5) * transform.scaleY + transform.offsetY;
 
   return {
     x: normalizedX * image.naturalWidth,
@@ -35,14 +37,282 @@ function estimateCellRadius(board: Board, image: HTMLImageElement, transform: Ov
   const shortSide = Math.min(image.naturalWidth, image.naturalHeight);
 
   if (board.kind === "square") {
-    return (shortSide * transform.scale) / board.size / 3;
+    return (shortSide * Math.min(transform.scaleX, transform.scaleY)) / board.size / 3;
   }
 
-  return shortSide * transform.scale * 0.045;
+  const points = board.cells.map((cell) => toImagePoint(cell, image, transform));
+  let nearestDistance = Number.POSITIVE_INFINITY;
+
+  for (let first = 0; first < points.length; first += 1) {
+    for (let second = first + 1; second < points.length; second += 1) {
+      const distance = Math.hypot(
+        points[first].x - points[second].x,
+        points[first].y - points[second].y
+      );
+
+      if (distance > 1 && distance < nearestDistance) {
+        nearestDistance = distance;
+      }
+    }
+  }
+
+  return Number.isFinite(nearestDistance) ? nearestDistance * 0.48 : shortSide * 0.035;
 }
 
 function luminance(data: Uint8ClampedArray, offset: number): number {
   return data[offset] * 0.2126 + data[offset + 1] * 0.7152 + data[offset + 2] * 0.0722;
+}
+
+function pixelLuminance(imageData: ImageData, x: number, y: number): number {
+  const clampedX = Math.max(0, Math.min(imageData.width - 1, Math.round(x)));
+  const clampedY = Math.max(0, Math.min(imageData.height - 1, Math.round(y)));
+
+  return luminance(imageData.data, (clampedY * imageData.width + clampedX) * 4);
+}
+
+type BoundingBox = {
+  minX: number;
+  minY: number;
+  maxX: number;
+  maxY: number;
+  area: number;
+};
+
+function detectHexTileBoundingBox(imageData: ImageData): BoundingBox | null {
+  const { width, height, data } = imageData;
+  const step = Math.max(2, Math.round(Math.min(width, height) / 650));
+  const sampledWidth = Math.ceil(width / step);
+  const sampledHeight = Math.ceil(height / step);
+  const mask = new Uint8Array(sampledWidth * sampledHeight);
+  const xStart = Math.floor((width * 0.22) / step);
+  const xEnd = Math.ceil((width * 0.78) / step);
+  const yStart = Math.floor((height * 0.25) / step);
+  const yEnd = Math.ceil((height * 0.86) / step);
+
+  for (let sy = yStart; sy < yEnd; sy += 1) {
+    const y = Math.min(height - 1, sy * step);
+
+    for (let sx = xStart; sx < xEnd; sx += 1) {
+      const x = Math.min(width - 1, sx * step);
+      const value = luminance(data, (y * width + x) * 4);
+
+      if (value < 32 || value > 68) {
+        mask[sy * sampledWidth + sx] = 1;
+      }
+    }
+  }
+
+  const seen = new Uint8Array(mask.length);
+  let best: BoundingBox | null = null;
+
+  for (let start = 0; start < mask.length; start += 1) {
+    if (!mask[start] || seen[start]) {
+      continue;
+    }
+
+    const stack = [start];
+    seen[start] = 1;
+    let area = 0;
+    let minSampleX = Number.POSITIVE_INFINITY;
+    let maxSampleX = Number.NEGATIVE_INFINITY;
+    let minSampleY = Number.POSITIVE_INFINITY;
+    let maxSampleY = Number.NEGATIVE_INFINITY;
+
+    while (stack.length > 0) {
+      const current = stack.pop()!;
+      const sx = current % sampledWidth;
+      const sy = Math.floor(current / sampledWidth);
+      area += 1;
+      minSampleX = Math.min(minSampleX, sx);
+      maxSampleX = Math.max(maxSampleX, sx);
+      minSampleY = Math.min(minSampleY, sy);
+      maxSampleY = Math.max(maxSampleY, sy);
+
+      const neighbors = [
+        [sx + 1, sy],
+        [sx - 1, sy],
+        [sx, sy + 1],
+        [sx, sy - 1]
+      ];
+
+      for (const [nx, ny] of neighbors) {
+        if (nx < 0 || nx >= sampledWidth || ny < 0 || ny >= sampledHeight) {
+          continue;
+        }
+
+        const neighborIndex = ny * sampledWidth + nx;
+        if (mask[neighborIndex] && !seen[neighborIndex]) {
+          seen[neighborIndex] = 1;
+          stack.push(neighborIndex);
+        }
+      }
+    }
+
+    if (area < 400) {
+      continue;
+    }
+
+    const candidate = {
+      minX: minSampleX * step,
+      minY: minSampleY * step,
+      maxX: Math.min(width - 1, (maxSampleX + 1) * step),
+      maxY: Math.min(height - 1, (maxSampleY + 1) * step),
+      area: area * step * step
+    };
+    const candidateWidth = candidate.maxX - candidate.minX;
+    const candidateHeight = candidate.maxY - candidate.minY;
+    const aspect = candidateWidth / Math.max(candidateHeight, 1);
+
+    if (aspect < 0.45 || aspect > 1.35) {
+      continue;
+    }
+
+    if (!best || candidate.area > best.area) {
+      best = candidate;
+    }
+  }
+
+  return best;
+}
+
+function nearestCellDistance(cells: Cell[]): number {
+  let nearestDistance = Number.POSITIVE_INFINITY;
+
+  for (let first = 0; first < cells.length; first += 1) {
+    for (let second = first + 1; second < cells.length; second += 1) {
+      const distance = Math.hypot(
+        cells[first].x - cells[second].x,
+        cells[first].y - cells[second].y
+      );
+
+      if (distance > 0.0001 && distance < nearestDistance) {
+        nearestDistance = distance;
+      }
+    }
+  }
+
+  return nearestDistance;
+}
+
+function fitHexTransform(board: Board, imageData: ImageData): OverlayTransform | null {
+  if (board.kind !== "hex") {
+    return null;
+  }
+
+  const boundingBox = detectHexTileBoundingBox(imageData);
+  if (!boundingBox) {
+    return null;
+  }
+
+  const minCellX = Math.min(...board.cells.map((cell) => cell.x));
+  const maxCellX = Math.max(...board.cells.map((cell) => cell.x));
+  const minCellY = Math.min(...board.cells.map((cell) => cell.y));
+  const maxCellY = Math.max(...board.cells.map((cell) => cell.y));
+  const radius = nearestCellDistance(board.cells) * 0.56;
+  const detectedWidth = (boundingBox.maxX - boundingBox.minX) / imageData.width;
+  const detectedHeight = (boundingBox.maxY - boundingBox.minY) / imageData.height;
+  const centerX = (boundingBox.minX + boundingBox.maxX) / 2 / imageData.width;
+  const centerY = (boundingBox.minY + boundingBox.maxY) / 2 / imageData.height;
+
+  return {
+    scaleX: detectedWidth / (maxCellX - minCellX + radius * 2),
+    scaleY: detectedHeight / (maxCellY - minCellY + radius * 2),
+    offsetX: centerX - 0.5,
+    offsetY: centerY - 0.5
+  };
+}
+
+function sampleTileLuminance(imageData: ImageData, centerX: number, centerY: number, radius: number): number {
+  const step = Math.max(1, Math.floor(radius / 14));
+  const innerRadius = radius * 0.45;
+  const outerRadius = radius * 0.82;
+  let total = 0;
+  let count = 0;
+
+  for (let y = Math.floor(centerY - outerRadius); y <= centerY + outerRadius; y += step) {
+    for (let x = Math.floor(centerX - outerRadius); x <= centerX + outerRadius; x += step) {
+      const distance = Math.hypot(x - centerX, y - centerY);
+      if (distance < innerRadius || distance > outerRadius) {
+        continue;
+      }
+
+      const value = pixelLuminance(imageData, x, y);
+      if (value > 150) {
+        continue;
+      }
+
+      total += value;
+      count += 1;
+    }
+  }
+
+  return count > 0 ? total / count : pixelLuminance(imageData, centerX, centerY);
+}
+
+function clusterLuminance(values: number[], clusterCount: number): { states: number[]; confidence: number[] } {
+  const minValue = Math.min(...values);
+  const maxValue = Math.max(...values);
+
+  if (maxValue - minValue < 1) {
+    return {
+      states: values.map(() => 0),
+      confidence: values.map(() => 0)
+    };
+  }
+
+  let centers = Array.from(
+    { length: clusterCount },
+    (_, index) => minValue + ((maxValue - minValue) * index) / Math.max(clusterCount - 1, 1)
+  );
+  let assignments = values.map(() => 0);
+
+  for (let iteration = 0; iteration < 16; iteration += 1) {
+    assignments = values.map((value) => {
+      let bestIndex = 0;
+      let bestDistance = Number.POSITIVE_INFINITY;
+
+      centers.forEach((center, index) => {
+        const distance = Math.abs(value - center);
+        if (distance < bestDistance) {
+          bestDistance = distance;
+          bestIndex = index;
+        }
+      });
+
+      return bestIndex;
+    });
+
+    centers = centers.map((center, index) => {
+      const assigned = values.filter((_, valueIndex) => assignments[valueIndex] === index);
+      return assigned.length > 0
+        ? assigned.reduce((sum, value) => sum + value, 0) / assigned.length
+        : center;
+    });
+  }
+
+  const orderedCenters = centers
+    .map((center, index) => ({ center, index }))
+    .sort((first, second) => first.center - second.center);
+  const rankByCluster = new Map(orderedCenters.map((entry, rank) => [entry.index, rank]));
+  const range = maxValue - minValue;
+
+  return {
+    states: assignments.map((assignment) => rankByCluster.get(assignment) ?? 0),
+    confidence: values.map((value, index) => {
+      const ownCenter = centers[assignments[index]];
+      const ownDistance = Math.abs(value - ownCenter);
+      const nearestOtherDistance = Math.min(
+        ...centers
+        .filter((_, centerIndex) => centerIndex !== assignments[index])
+          .map((center) => Math.abs(value - center))
+      );
+
+      return Math.max(
+        0,
+        Math.min(1, (nearestOtherDistance - ownDistance) / Math.max(range / clusterCount, 1))
+      );
+    })
+  };
 }
 
 function stateFromVector(dx: number, dy: number, modulus: number): number {
@@ -136,9 +406,31 @@ export async function analyzeImageBoard(
 
   context.drawImage(image, 0, 0);
   const imageData = context.getImageData(0, 0, canvas.width, canvas.height);
-  const radius = estimateCellRadius(board, image, transform);
+  const suggestedTransform = fitHexTransform(board, imageData) ?? undefined;
+  const analysisTransform = suggestedTransform ?? transform;
+  const radius = estimateCellRadius(board, image, analysisTransform);
+
+  if (board.kind === "hex") {
+    const samples = board.cells.map((cell) => {
+      const point = toImagePoint(cell, image, analysisTransform);
+      return sampleTileLuminance(imageData, point.x, point.y, radius);
+    });
+    const clustered = clusterLuminance(samples, board.modulus);
+    const cells = board.cells.map((cell) => ({
+      cellId: cell.id,
+      state: clustered.states[cell.id],
+      confidence: clustered.confidence[cell.id]
+    }));
+
+    return {
+      states: cells.map((cell) => cell.state),
+      cells,
+      suggestedTransform
+    };
+  }
+
   const cells = board.cells.map((cell) => {
-    const point = toImagePoint(cell, image, transform);
+    const point = toImagePoint(cell, image, analysisTransform);
     const result = recognizeOneCell(imageData, point.x, point.y, radius, board.modulus);
 
     return {
@@ -149,5 +441,5 @@ export async function analyzeImageBoard(
   });
   const states = cells.map((cell) => cell.state);
 
-  return { states, cells };
+  return { states, cells, suggestedTransform };
 }

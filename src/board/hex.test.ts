@@ -2,19 +2,29 @@ import { describe, expect, it } from "vitest";
 import { createBoard } from ".";
 
 describe("hex board geometry", () => {
-  it("matches the in-game diagonal row shape", () => {
+  it("keeps the axial side-length-4 row shape", () => {
     const board = createBoard("hard");
     const rowLengths = Array.from({ length: 7 }, (_, row) =>
       board.cells.filter((cell) => cell.row === row).length
     );
 
     expect(rowLengths).toEqual([4, 5, 6, 7, 6, 5, 4]);
+  });
 
-    const firstRow = board.cells.filter((cell) => cell.row === 0);
-    for (let index = 1; index < firstRow.length; index += 1) {
-      expect(firstRow[index].x).toBeGreaterThan(firstRow[index - 1].x);
-      expect(firstRow[index].y).toBeLessThan(firstRow[index - 1].y);
+  it("matches the in-game point-up visual rows", () => {
+    const board = createBoard("hard");
+    const visualRows = new Map<string, number>();
+
+    for (const cell of board.cells) {
+      const key = cell.y.toFixed(4);
+      visualRows.set(key, (visualRows.get(key) ?? 0) + 1);
     }
+
+    const rowLengths = [...visualRows.entries()]
+      .sort(([first], [second]) => Number(first) - Number(second))
+      .map(([, count]) => count);
+
+    expect(rowLengths).toEqual([1, 2, 3, 4, 3, 4, 3, 4, 3, 4, 3, 2, 1]);
   });
 
   it("keeps hex neighbor counts correct", () => {
