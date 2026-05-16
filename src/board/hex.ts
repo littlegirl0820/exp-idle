@@ -11,22 +11,24 @@ const neighborDirections = [
 
 export function createHexBoard(difficulty: Extract<Difficulty, "hard" | "expert">): HexBoard {
   const radius = 3;
-  const rawCells: Array<{ q: number; r: number }> = [];
+  const rawCells: Array<{ q: number; r: number; row: number; col: number }> = [];
 
-  for (let r = -radius; r <= radius; r += 1) {
+  for (let r = radius, row = 0; r >= -radius; r -= 1, row += 1) {
     const qMin = Math.max(-radius, -r - radius);
     const qMax = Math.min(radius, -r + radius);
 
-    for (let q = qMin; q <= qMax; q += 1) {
-      rawCells.push({ q, r });
+    for (let q = qMin, col = 0; q <= qMax; q += 1, col += 1) {
+      rawCells.push({ q, r, row, col });
     }
   }
 
-  const projected = rawCells.map(({ q, r }) => ({
+  const projected = rawCells.map(({ q, r, row, col }) => ({
     q,
     r,
-    px: Math.sqrt(3) * (q + r / 2),
-    py: 1.5 * r
+    row,
+    col,
+    px: 1.5 * q,
+    py: -Math.sqrt(3) * (r + q / 2)
   }));
   const minX = Math.min(...projected.map((cell) => cell.px));
   const maxX = Math.max(...projected.map((cell) => cell.px));
@@ -39,6 +41,8 @@ export function createHexBoard(difficulty: Extract<Difficulty, "hard" | "expert"
     label: String(id + 1),
     q: cell.q,
     r: cell.r,
+    row: cell.row,
+    col: cell.col,
     x: padding + ((cell.px - minX) / (maxX - minX)) * (1 - padding * 2),
     y: padding + ((cell.py - minY) / (maxY - minY)) * (1 - padding * 2)
   }));
